@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JavaTech Race Box PRO V11 Ultimate</title>
+<style>
+body {
+    margin:0;
+    font-family:'Arial', sans-serif;
+    background: linear-gradient(180deg,#000000,#111111,#000000);
+    color:white;
+    text-align:center;
+}
+.header {
+    background:#0f0f0f;
+    padding:20px;
+    font-size:30px;
+    color:#00ff9c;
+    letter-spacing:2px;
+    box-shadow:0 0 25px #00ff9c55;
+}
+.container {
+    padding:15px;
+}
+.timer {
+    font-size:65px;
+    font-weight:bold;
+    margin:10px 0;
+    color:#00ff9c;
+}
+.speedBox {
+    font-size:38px;
+    margin:5px 0;
+}
+.panel {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:15px;
+    margin-top:15px;
+}
+.card {
+    background:#121212;
+    padding:18px;
+    border-radius:12px;
+    box-shadow:0 0 15px #00ff9c55;
+    font-size:18px;
+}
+.card span { font-size:26px; color:#00ff9c; }
+.buttons { margin-top:20px; }
+button {
+    font-size:17px;
+    padding:12px 22px;
+    margin:6px;
+    border:none;
+    border-radius:12px;
+    cursor:pointer;
+    box-shadow:0 0 8px #000;
+}
+.start { background:#00ff9c; color:black; }
+.reset { background:#ff3b3b; color:white; }
+.historybtn { background:#2b7cff; color:white; }
+#history { margin-top:20px; text-align:left; }
+.historyCard {
+    background:#121212;
+    padding:14px;
+    border-radius:10px;
+    margin:8px;
+    box-shadow:0 0 10px #00ff9c33;
+}
+.footer { margin-top:20px; font-size:14px; color:#777; }
+canvas { margin-top:15px; border-radius:12px; background:#121212; }
+</style>
+</head>
+<body>
+
+<div class="header">JavaTech Race Box PRO V11 Ultimate</div>
+<div class="container">
+
+<div class="timer" id="timer">0.000</div>
+<div class="speedBox">Speed : <span id="speed">0</span> km/h</div>
+<div class="speedBox">Top Speed : <span id="topspeed">0</span> km/h</div>
+<canvas id="analog" width="250" height="250"></canvas>
+
+<div class="panel">
+    <div class="card">0-60 km/h<br><span id="zero60">-</span> s</div>
+    <div class="card">60 Meter<br><span id="m60">-</span> s</div>
+    <div class="card">201 Meter<br><span id="m201">-</span> s</div>
+    <div class="card">401 Meter<br><span id="m401">-</span> s</div>
+</div>
+
+<canvas id="speedChart" width="350" height="150"></canvas>
+
+<div class="buttons">
+    <button class="start" onclick="startRace()">START</button>
+    <button class="reset" onclick="resetRace()">RESET</button>
+    <button class="historybtn" onclick="showHistory()">HISTORY</button>
+    <button class="historybtn" onclick="exportCSV()">EXPORT CSV</button>
+</div>
+<div id="history"></div>
+<div class="footer">JavaTech Racing Technology</div>
+</div>
+
+<script>
+let watchID, startTime, startPos;
+let topSpeed=0, zero60done=false, m60done=false, m201done=false, m401done=false;
+let history=[], distance=0, speedLog=[];
+
+const analog=document.getElementById("analog"), ctxA=analog.getContext("2d");
+function drawAnalog(speed){
+    ctxA.clearRect(0,0,analog.width,analog.height);
+    const cx=analog.width/2, cy=analog.height/2, r=analog.width/2-20;
+    ctxA.beginPath(); ctxA.arc(cx,cy,r,0,2*Math.PI); ctxA.fillStyle="#121212"; ctxA.fill();
+    ctxA.lineWidth=4; ctxA.strokeStyle="#00ff9c"; ctxA.stroke();
+    for(let i=0;i<=180;i+=20){
+        const ang=Math.PI*(1+i/180);
+        const x1=cx+Math.cos(ang)*(r-10), y1=cy+Math.sin(ang)*(r-10);
+        const x2=cx+Math.cos(ang)*r, y2=cy+Math.sin(ang)*r;
+        ctxA.beginPath(); ctxA.moveTo(x1,y1); ctxA.lineTo(x2,y2); ctxA.stroke();
+    }
+    const angle=Math.PI*(1+Math.min(speed,180)/180);
+    ctxA.beginPath(); ctxA.moveTo(cx,cy); ctxA.lineTo(cx+Math.cos(angle)*(r-20),cy+Math.sin(angle)*(r-20));
+    ctxA.strokeStyle="#ff3b3b"; ctxA.lineWidth=4; ctxA.stroke();
+    ctxA.beginPath(); ctxA.arc(cx,cy,6,0,2*Math.PI); ctxA.fillStyle="#fff"; ctxA.fill();
+}
+
+const canvas=document.getElementById("speedChart"), ctx=canvas.getContext("2d");
+function drawChart(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(speedLog.length<2)return;
+    ctx.strokeStyle="#00ff9c"; ctx.lineWidth=2; ctx.beginPath();
+    for(let i=0;i<speedLog.length;i++){
+        let x=(i/(speedLog.length-1))*(canvas.width-20)+10;
+        let y=canvas.height-(speedLog[i]/Math.max(...speedLog,100))*canvas.height;
+        if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+}
+
+function getDistance(lat1,lon1,lat2,lon2){
+    const R=6371000; const dLat=(lat2-lat1)*Math.PI/180; const dLon=(lon2-lon1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); return R*c;
+}
+
+function startRace(){
+    topSpeed=0; zero60done=false; m60done=false; m201done=false; m401done=false;
+    distance=0; speedLog=[];
+    navigator.geolocation.getCurrentPosition(pos=>{
+        startPos=pos.coords; startTime=Date.now();
+        watchID=navigator.geolocation.watchPosition(updateRace,error,{enableHighAccuracy:true,maximumAge:0,timeout:10000});
+    });
+}
+
+function updateRace(pos){
+    if(pos.coords.accuracy>15)return;
+    let speed=(pos.coords.speed||0)*3.6; if(speed<3)speed=0;
+    document.getElementById("speed").innerText=speed.toFixed(1); drawAnalog(speed);
+    if(speed>topSpeed && speed>5){ topSpeed=speed; document.getElementById("topspeed").innerText=topSpeed.toFixed(1); }
+    let time=(Date.now()-startTime)/1000; document.getElementById("timer").innerText=time.toFixed(3);
+    distance=getDistance(startPos.latitude,startPos.longitude,pos.coords.latitude,pos.coords.longitude);
+    if(speed>=60 && !zero60done){ document.getElementById("zero60").innerText=time.toFixed(3); zero60done=true; }
+    if(distance>=60 && !m60done){ document.getElementById("m60").innerText=time.toFixed(3); m60done=true; }
+    if(distance>=201 && !m201done){ document.getElementById("m201").innerText=time.toFixed(3); m201done=true; }
+    if(distance>=401 && !m401done){ document.getElementById("m401").innerText=time.toFixed(3); m401done=true; saveHistory(time); }
+    speedLog.push(speed); drawChart();
+}
+
+function resetRace(){
+    navigator.geolocation.clearWatch(watchID);
+    document.getElementById("timer").innerText="0.000";
+    document.getElementById("speed").innerText="0";
+    document.getElementById("topspeed").innerText="0";
+    document.getElementById("zero60").innerText="-";
+    document.getElementById("m60").innerText="-";
+    document.getElementById("m201").innerText="-";
+    document.getElementById("m401").innerText="-";
+    speedLog=[]; ctx.clearRect(0,0,canvas.width,canvas.height); ctxA.clearRect(0,0,analog.width,analog.height);
+}
+
+function saveHistory(time){
+    let data={time:time.toFixed(3), top:topSpeed.toFixed(1)};
+    history.unshift(data);
+    localStorage.setItem("raceHistory",JSON.stringify(history));
+}
+function showHistory(){
+    history=JSON.parse(localStorage.getItem("raceHistory"))||[];
+    let html="<h2>Race History</h2>";
+    history.forEach((h,i)=>{ html+=`<div class="historyCard">Run ${i+1}<br>401m : ${h.time} s<br>Top Speed : ${h.top} km/h</div>`; });
+    document.getElementById("history").innerHTML=html;
+}
+function exportCSV(){
+    history=JSON.parse(localStorage.getItem("raceHistory"))||[];
+    let csv="Run,401m (s),Top Speed (km/h)\n";
+    history.forEach((h,i)=>{ csv+=`${i+1},${h.time},${h.top}\n`; });
+    let blob=new Blob([csv],{type:'text/csv'}); let url=URL.createObjectURL(blob);
+    let a=document.createElement('a'); a.href=url; a.download="race_history.csv"; a.click(); URL.revokeObjectURL(url);
+}
+function error(){ alert("GPS Error"); }
+</script>
+</body>
+</html>
